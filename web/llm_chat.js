@@ -3,9 +3,11 @@
  */
 async function generate_image(prompt) {
   const NIMBUS_TOKEN = 'eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImIzOTQ0ZDkwIn0.eyJzdWIiOiJhNTU2ZWQxOS03Y2EzLTRjNWQtYWRiYy1jYWIzNjQ5MDI3MDciLCJ0eXBlIjoidXNlckFjY2Vzc1Rva2VuIiwidGVuYW50SWQiOiIyODM2MzgxMS03MmNhLTQ5ZjctYTJiNC0xNGE1MjdhY2Y4N2EiLCJ1c2VySWQiOiJkNWY5YzAxOC1kYzE3LTQxYjMtODgyZi1jOWI3YzMxMjdjMDEiLCJyb2xlcyI6WyJGRVRDSC1ST0xFUy1CWS1BUEkiXSwicGVybWlzc2lvbnMiOlsiRkVUQ0gtUEVSTUlTU0lPTlMtQlktQVBJIl0sImF1ZCI6ImIzOTQ0ZDkwLWYwY2YtNGYxNS04YjMzLWE1MGQ5YTFiYzQzOSIsImlzcyI6Imh0dHBzOi8vYXBwLWU4cTU4Mm03Njc2ZS5mcm9udGVnZy5jb20iLCJpYXQiOjE2ODE3NjExNjl9.dHMRMGnB8fEutHPuimkd_zpQZ2gM-n8w2z-mLIhLX_RvB77YVgl2kBBssHNm7PCtJ5Dks2ekgl34FqdM_awUzzJYP1vk4bGpGtnvbuWURmgMFxMkamsbD6In7gLQR6bx14Ubvm6V0EbYkWbK-Me79HCN-kBZiqeERVwtWYtir9OMH63Fj6zaoIEWqj1hY9afDz4zO2oEw9vQ3F2cRRePks5S_uV9XHcmBEg1SnwvyCmPNizQN_TM_XJFrq1Ne4pI75F26FaA9JcI3ig2NSyRevbnnd7lqoDzBSrACKJfR3Oa_m2l7_pmPE_UGOIrBiOB1Mcao18RBlzaNc_XbMug4g';
-  const url = 'https://tvm-stable-diffusion-r43s9sjl17jq.cheese.octoml.ai/predict';
+  //const url = 'https://tvm-stable-diffusion-r43s9sjl17jq.cheese.octoml.ai/predict';
+  const url = 'https://stable-diffusion-demo-kk0powt97tmb.octoai.cloud/predict';
+
   const headers = {
-      'Authorization': `Bearer ${NIMBUS_TOKEN}`,
+      //'Authorization': `Bearer ${NIMBUS_TOKEN}`,
       'Content-Type': 'application/json'
   };
   const payload = { prompt: prompt };
