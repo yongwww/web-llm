@@ -14,6 +14,7 @@ echo "Copy files..."
 cp web/llm_chat.html site/_includes
 cp web/llm_chat.js site/dist/
 cp web/llm_chat.css site/dist/
+cp web/image.html site/_includes
 
 cp dist/tvmjs_runtime.wasi.js site/dist
 cp dist/tvmjs.bundle.js site/dist

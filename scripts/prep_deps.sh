@@ -26,4 +26,4 @@ rm -rf dist/sentencepiece
 cp -r ${SENTENCEPIECE_JS_HOME}/dist dist/sentencepiece
 
 echo "Exporting tvmjs runtime dist files"
-python -c "from tvm.contrib import tvmjs; tvmjs.export_runtime(\"dist\")"
+python3 -c "from tvm.contrib import tvmjs; tvmjs.export_runtime(\"dist\")"

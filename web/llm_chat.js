@@ -1,3 +1,28 @@
+ /**
+ * Get an image from a nimbus stable diffusion service
+ */
+async function generate_image(prompt) {
+  const NIMBUS_TOKEN = 'eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImIzOTQ0ZDkwIn0.eyJzdWIiOiJhNTU2ZWQxOS03Y2EzLTRjNWQtYWRiYy1jYWIzNjQ5MDI3MDciLCJ0eXBlIjoidXNlckFjY2Vzc1Rva2VuIiwidGVuYW50SWQiOiIyODM2MzgxMS03MmNhLTQ5ZjctYTJiNC0xNGE1MjdhY2Y4N2EiLCJ1c2VySWQiOiJkNWY5YzAxOC1kYzE3LTQxYjMtODgyZi1jOWI3YzMxMjdjMDEiLCJyb2xlcyI6WyJGRVRDSC1ST0xFUy1CWS1BUEkiXSwicGVybWlzc2lvbnMiOlsiRkVUQ0gtUEVSTUlTU0lPTlMtQlktQVBJIl0sImF1ZCI6ImIzOTQ0ZDkwLWYwY2YtNGYxNS04YjMzLWE1MGQ5YTFiYzQzOSIsImlzcyI6Imh0dHBzOi8vYXBwLWU4cTU4Mm03Njc2ZS5mcm9udGVnZy5jb20iLCJpYXQiOjE2ODE3NjExNjl9.dHMRMGnB8fEutHPuimkd_zpQZ2gM-n8w2z-mLIhLX_RvB77YVgl2kBBssHNm7PCtJ5Dks2ekgl34FqdM_awUzzJYP1vk4bGpGtnvbuWURmgMFxMkamsbD6In7gLQR6bx14Ubvm6V0EbYkWbK-Me79HCN-kBZiqeERVwtWYtir9OMH63Fj6zaoIEWqj1hY9afDz4zO2oEw9vQ3F2cRRePks5S_uV9XHcmBEg1SnwvyCmPNizQN_TM_XJFrq1Ne4pI75F26FaA9JcI3ig2NSyRevbnnd7lqoDzBSrACKJfR3Oa_m2l7_pmPE_UGOIrBiOB1Mcao18RBlzaNc_XbMug4g';
+  const url = 'https://tvm-stable-diffusion-r43s9sjl17jq.cheese.octoml.ai/predict';
+  const headers = {
+      'Authorization': `Bearer ${NIMBUS_TOKEN}`,
+      'Content-Type': 'application/json'
+  };
+  const payload = { prompt: prompt };
+
+  const response = await fetch(url, {
+      method: 'POST',
+      headers: headers,
+      body: JSON.stringify(payload)
+  });
+
+  const result = await response.json(); 
+  const imageData = result.image_0;
+
+  // Set the image source to the base64 string
+  document.getElementById('output-image').src = `data:image/png;base64,${imageData}`;    
+}
+
 /**
  * Helper to keep track of history conversations.
  */
@@ -603,7 +628,7 @@ class LLMChatInstance {
       return;
     }
 
-    const prompt = this.uiChatInput.value;
+    var prompt = this.uiChatInput.value;
     if (prompt == "") {
       this.requestInProgress = false;
       return;
@@ -614,6 +639,7 @@ class LLMChatInstance {
     this.uiChatInput.setAttribute("placeholder", "Generating...");
 
     this.appendMessage("left", "");
+
     const callbackUpdateResponse = (step, msg) => {
       if (msg.endsWith("##")) {
         msg = msg.substring(0, msg.length - 2);
@@ -622,10 +648,19 @@ class LLMChatInstance {
       }
       this.updateLastMessage("left", msg);
     };
+
+    const callbackDoNothing = (step, msg) => {
+      return;
+    };
+
     try {
-      const output = await this.pipeline.generate(prompt, callbackUpdateResponse);
+      var output = await this.pipeline.generate(prompt, callbackUpdateResponse);
       this.updateLastMessage("left", output);
+      prompt = "Provide a concise description of a painting that would illustrate my previous comment."
+      output = await this.pipeline.generate(prompt, callbackDoNothing);
+      generate_image(output);
       this.uiChatInfoLabel.innerHTML = this.pipeline.runtimeStatsText();
+
     } catch (err) {
       this.appendMessage("error", "Generate error, " + err.toString());
       console.log(err.stack);

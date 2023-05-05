@@ -14,4 +14,4 @@ if [ -d "dist/wizardlm-7b/params" ]; then
     ln -s `pwd`/dist/wizardlm-7b/params site/_site/wizardlm-7b-params
 fi
 
-cd site && jekyll serve  --skip-initial-build --host localhost --baseurl /web-llm --port 8888
+cd site && jekyll serve  --host localhost --baseurl /web-llm --port 8888
