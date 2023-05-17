@@ -1,4 +1,7 @@
- /**
+// import { OpenAI } from "langchain/llms/openai";
+// import { PromptTemplate } from "https://esm.sh/langchain/prompts";
+
+/**
  * Get an image from a nimbus stable diffusion service
  */
 async function generate_image(prompt) {
@@ -140,8 +143,8 @@ function defaultConversation(maxWindowLength = 512) {
 };
 
 class LLMChatPipeline {
-  constructor(tvm, tokenizer, cacheMetadata, config) {
-    if (cacheMetadata == undefined) {
+  constructor(tvm, tokenizer, cacheMetadata, config, LCPrompts) {
+    if (cacheMetadata == undefined) {a
       throw Error("Expect cacheMetadata");
     }
     this.tvm = tvm;
@@ -153,6 +156,7 @@ class LLMChatPipeline {
     this.maxWindowLength = config.maxWindowLength;
     this.maxGenLength = config.maxGenLength;
     this.meanGenLength = config.meanGenLength;
+    this.LCPrompts = LCPrompts
     this.streamInterval = 1;
 
     this.decodingTotalTime = 0;
@@ -533,8 +537,12 @@ class LLMChatInstance {
     if (this.pipeline !== undefined) return;
     // initialize UX and tokenizer
     const tokenizer = await tvmjsGlobalEnv.sentencePieceProcessor(this.config.tokenizer);
+    const LCPrompts = await tvmjsGlobalEnv.LangChainPrompts();
+    const LCAgents = await tvmjsGlobalEnv.LangChainAgents();
+    const LCTools = await tvmjsGlobalEnv.LangChainTools();
+    const LCCalculator = await tvmjsGlobalEnv.LangChainCalculator();
     this.pipeline = this.tvm.withNewScope(() => {
-      return new LLMChatPipeline(this.tvm, tokenizer, this.tvm.cacheMetadata, this.config);
+      return new LLMChatPipeline(this.tvm, tokenizer, this.tvm.cacheMetadata, this.config, LCPrompts);
     });
     await this.pipeline.asyncLoadWebGPUPiplines();
     this.updateLastMessage("init", "All initialization finished.");
@@ -660,7 +668,20 @@ class LLMChatInstance {
       this.updateLastMessage("left", output);
       prompt = "Provide a concise description of a painting that would illustrate my previous comment."
       output = await this.pipeline.generate(prompt, callbackDoNothing);
-      generate_image(output);
+      // #####
+      // prompts
+      console.log("generated prompt: ", + output);
+      const template = "create a picture with green background, and {input_var}?";
+      const langchain_prompt = new this.pipeline.LCPrompts.PromptTemplate({
+          template: template,
+          inputVariables: ["input_var"],
+      });
+      console.log(langchain_prompt);
+      const lc_prompts = await langchain_prompt.format({ input_var: output});
+      console.log(lc_prompts);
+      // todo (yongwww): agents and tools
+      // #####
+      generate_image(lc_prompts);
       this.uiChatInfoLabel.innerHTML = this.pipeline.runtimeStatsText();
 
     } catch (err) {

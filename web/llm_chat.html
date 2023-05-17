@@ -21,16 +21,57 @@
   }
   tvmjsGlobalEnv.sentencePieceProcessor = getTokenizer;
 </script>
+<script type="module">
+  async function loadLangChainPrompts() {
+    console.log("start to import langchain_prompt");
+    const LCPrompts = await import("https://esm.sh/langchain/prompts");
+    console.log("langchain_prompt was imported");
+    console.log(LCPrompts);
+    return LCPrompts
+  }
+  tvmjsGlobalEnv.LangChainPrompts = loadLangChainPrompts;
+</script>
+<script type="module">
+  async function loadLangChainAgents() {
+    console.log("starts to import langchain_agents");
+    const LCAgents = await import("https://esm.sh/langchain/agents");
+    console.log("langchain_agents was imported");
+    console.log(LCAgents);
+    return LCAgents
+  }
+  tvmjsGlobalEnv.LangChainAgents = loadLangChainAgents;
+</script>
+<script type="module">
+  async function loadLangChainTools() {
+    console.log("starts to import langchain_tools");
+    const LCTools = await import("https://esm.sh/langchain/tools");
+    console.log("langchain_tools was imported");
+    console.log(LCTools);
+    return LCTools
+  }
+  tvmjsGlobalEnv.LangChainTools = loadLangChainTools;
+</script>
+<script type="module">
+  async function loadLangChainCalculator() {
+    console.log("starts to import langchain_calculator");
+    const LCCalculator = await import("https://esm.sh/langchain/tools/calculator");
+    console.log("langchain_calculator was imported");
+    console.log(LCCalculator);
+    return LCCalculator
+  }
+  tvmjsGlobalEnv.LangChainCalculator = loadLangChainCalculator;
+</script>
 
 <script src="dist/llm_chat.js"></script>
-<link href="dist/llm_chat.css" rel="stylesheet" type="text/css"/>
+<link href="dist/llm_chat.css" rel="stylesheet" type="text/css" />
 
 <div class="chatui">
   <div class="chatui-chat" id="chatui-chat" height="100">
   </div>
 
   <div class="chatui-inputarea">
-    <input id="chatui-input" type="text" class="chatui-input" onkeypress="handleChatUIInputEnter(event)" placeholder="Enter your message...">
+    <input id="chatui-input" type="text" class="chatui-input" onkeypress="handleChatUIInputEnter(event)"
+      placeholder="Enter your message...">
     <button class="chatui-send-btn" onclick="tvmjsGlobalEnv.asyncOnGenerate()">Send</button>
   </div>
 </div>
