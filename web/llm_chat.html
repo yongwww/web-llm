@@ -61,6 +61,16 @@
   }
   tvmjsGlobalEnv.LangChainCalculator = loadLangChainCalculator;
 </script>
+<script type="module">
+  async function loadLangChainOpenAI() {
+    console.log("starts to import langchain_openai");
+    const LCOpenAI = await import("https://esm.sh/langchain/llms/openai");
+    console.log("langchain_openai was imported");
+    console.log(LCOpenAI);
+    return LCOpenAI
+  }
+  tvmjsGlobalEnv.LangChainOpenAI = loadLangChainOpenAI;
+</script>
 
 <script src="dist/llm_chat.js"></script>
 <link href="dist/llm_chat.css" rel="stylesheet" type="text/css" />

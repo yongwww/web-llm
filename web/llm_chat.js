@@ -143,7 +143,7 @@ function defaultConversation(maxWindowLength = 512) {
 };
 
 class LLMChatPipeline {
-  constructor(tvm, tokenizer, cacheMetadata, config, LCPrompts) {
+  constructor(tvm, tokenizer, cacheMetadata, config, LCPrompts, LCAgents, LCTools, LCCalculator, LCOpenAI) {
     if (cacheMetadata == undefined) {a
       throw Error("Expect cacheMetadata");
     }
@@ -157,6 +157,11 @@ class LLMChatPipeline {
     this.maxGenLength = config.maxGenLength;
     this.meanGenLength = config.meanGenLength;
     this.LCPrompts = LCPrompts
+    this.LCAgents = LCAgents
+    this.LCTools = LCTools
+    this.LCCalculator = LCCalculator
+    this.LCOpenAI = LCOpenAI
+
     this.streamInterval = 1;
 
     this.decodingTotalTime = 0;
@@ -438,6 +443,266 @@ class LLMChatPipeline {
     )
   }
 }
+/*
+interface BaseLanguageModelCallOptions {
+  stop?: string[];
+  timeout?: number;
+  signal?: AbortSignal;
+}
+interface OpenAICallOptions {
+  signal?: AbortSignal;
+  options?: AxiosRequestConfig;
+  stop?: string[];
+  timeout?: number;
+  signal?: AbortSignal;
+}
+*/
+
+class LocalLLM {
+  get callKeys(){
+    return ["stop", "signal", "timeout", "options"];
+  }
+  constructor(tvm, tokenizer, cacheMetadata, config) {
+    this.tvm = tvm;
+    this.logger = console.log;
+    this.tokenizer = tokenizer;
+    this.bosTokenId = 1;
+    this.eosTokenId = 2;
+
+    this.maxWindowLength = config.maxWindowLength;
+    this.maxGenLength = config.maxGenLength;
+    this.meanGenLength = config.meanGenLength;
+
+    this.streamInterval = 1;
+
+    this.decodingTotalTime = 0;
+    this.decodingTotalTokens = 0;
+    this.encodingTotalTime = 0;
+    this.encodingTotalTokens = 0;
+
+    this.conversation = defaultConversation();
+
+    this.device = this.tvm.webgpu();
+    this.vm = this.tvm.detachFromCurrentScope(
+      this.tvm.createVirtualMachine(this.device)
+    );
+    this.encoding = this.tvm.detachFromCurrentScope(
+      this.vm.getFunction("encoding")
+    );
+    this.decoding = this.tvm.detachFromCurrentScope(
+      this.vm.getFunction("decoding")
+    );
+    this.params = this.tvm.detachFromCurrentScope(
+      this.tvm.getParamsFromCache("param", cacheMetadata.ParamSize)
+    );
+    const fcreateCache = this.vm.getFunction("create_kv_cache");
+    this.fclearKVCaches = this.tvm.detachFromCurrentScope(
+      this.tvm.getGlobalFunc("vm.builtin.attention_kv_cache_array_clear")
+    );
+
+    // use extern config for now
+    this.kvCache = this.tvm.detachFromCurrentScope(fcreateCache());
+    // fill with pad token
+    this.logitsOnCPU = undefined;
+
+    this.kvCacheLength = 0;
+    this.clearCache = true
+  }
+
+
+  dispose() {
+    // note: tvm instance is not owned by this class
+    this.params.dispose();
+    this.decoding.dispose();
+    this.encoding.dispose();
+    this.vm.dispose();
+    this.kvCache.dispose();
+    this.fclearKVCaches.dispose();
+    if (this.logitsOnCPU != undefined) {
+      this.logitsOnCPU.dispose();
+    }
+  }
+
+  #clearKVCache() {
+    this.fclearKVCaches(this.kvCache);
+    this.kvCacheLength = 0;
+  }
+
+  #forward(inputs, curPos) {
+    this.tvm.beginScope();
+    var retValue;
+    const seqLenShape = this.tvm.makeShapeTuple([curPos]);
+    if (inputs.shape[1] > 1) {
+      retValue = this.encoding(
+        inputs, seqLenShape, this.kvCache, this.params
+      );
+    } else {
+      retValue = this.decoding(
+        inputs, seqLenShape, this.kvCache, this.params
+      );
+    }
+    const logits = this.tvm.detachFromCurrentScope(retValue.get(0));
+    this.tvm.endScope();
+    this.tvm.attachToCurrentScope(logits);
+    return logits;
+  }
+
+  // NOTE: caller must call device.sync()
+  #updateLogitsOnCPU(logits) {
+    if (this.logitsOnCPU == undefined) {
+      this.logitsOnCPU = this.tvm.detachFromCurrentScope(
+        this.tvm.empty(logits.shape, logits.dtype, this.tvm.cpu())
+      );
+    } else {
+      if (logits.shape[0] != this.logitsOnCPU.shape[0]) {
+        throw Error("We expect the size of logits to remain unchanged");
+      }
+    }
+    this.logitsOnCPU.copyFrom(logits);
+  }
+
+  async sampleTokenFromLogits(logits, temperature = 0.8, top_p = 0.95) {
+    this.tvm.beginScope();
+    this.#updateLogitsOnCPU(logits);
+    this.tvm.endScope();
+    await this.device.sync();
+    return this.tvm.sampleTopPFromLogits(this.logitsOnCPU, temperature, top_p);
+  }
+
+  async getInputTokens() {
+    let tokens = [this.bosTokenId];
+    let prompts = ""
+    if (this.conversation.messages.length <= 2) {
+      prompts = this.conversation.getPromptArray();
+    } else {
+      tokens.pop();
+      prompts = this.conversation.getPromptArrayUnproccessed();
+    }
+    tokens.push(...await this.tokenizer.encodeIds(prompts[0]));
+    let ctxLength = tokens.length;
+    let context = [];
+    let need_shift_window = false;
+    for (let i = prompts.length - 1; i > 0; --i) {
+      const encoded = this.tokenizer.encodeIds(prompts[i]);
+      ctxLength += encoded.length;
+      if (this.kvCacheLength + ctxLength + this.meanGenLength >= this.maxWindowLength) {
+        need_shift_window = true;
+        break;
+      }
+      context.unshift(encoded);
+    }
+    if (!need_shift_window) {
+      for (const ctx of context) {
+        tokens.push(...ctx);
+      }
+      return tokens;
+    }
+    // need shift window and re-encode
+    this.logger("need shift window")
+    this.kvCacheLength = 0;
+    this.clearCache = true;
+    // abandon all tokens we collected
+    tokens = [this.bosTokenId]
+    let all_prompts = this.conversation.getPromptArray();
+    tokens.push(...await this.tokenizer.encodeIds(all_prompts[0]));
+    context = [];
+    ctxLength = tokens.length;
+    //only keep 10% of the window context
+    const fill_factor = 0.1
+    for (let i = all_prompts.length - 1; i > 0; --i) {
+      const encoded = this.tokenizer.encodeIds(all_prompts[i]);
+      ctxLength += encoded.length;
+      if (ctxLength >= fill_factor * this.maxWindowLength && i + 2 < all_prompts.length) {
+        break;
+      }
+      context.unshift(encoded);
+    }
+    for (const ctx of context) {
+      tokens.push(...ctx);
+    }
+    if (tokens.length + this.meanGenLength >= this.maxWindowLength) {
+      throw Error("Exceed max window length curr=" + tokens.length);
+    }
+    return tokens;
+  }
+
+  resetChat() {
+    this.conversation.reset();
+    this.#clearKVCache();
+    this.decodingTotalTime = 0;
+    this.encodingTotalTime = 0;
+    this.decodingTotalTokens = 0;
+    this.encodingTotalTokens = 0;
+  }
+
+  async _generate(inputPrompt) {
+    this.conversation.appendMessage(this.conversation.roles[0], inputPrompt);
+    this.conversation.appendMessage(this.conversation.roles[1], "");
+    const stopStr = this.conversation.getStopStr();
+    const tokens = await this.getInputTokens();
+    const inputTokenLength = tokens.length;
+
+    var outputPrompt = "";
+    if (this.clearCache) {
+      this.#clearKVCache();
+      this.clearCache = false;
+    }
+    const maxGenLen = Math.min(this.maxGenLength, this.maxWindowLength - tokens.length);
+    if (maxGenLen < this.meanGenLength) {
+      throw Error("Too small window size config");
+    }
+    let step = 0;
+    for (; step < maxGenLen && this.kvCacheLength + inputTokenLength + step < this.maxWindowLength; ++step) {
+      this.tvm.beginScope();
+      var inputData;
+      let tstart = performance.now();
+      if (step == 0) {
+        inputData = this.tvm.empty([1, tokens.length], "int32", this.device);
+        inputData.copyFrom(tokens);
+      } else {
+        inputData = this.tvm.empty([1, 1], "int32", this.device);
+        inputData.copyFrom(tokens.slice(tokens.length - 1));
+      }
+      const logits = this.tvm.detachFromCurrentScope(
+        this.#forward(inputData, this.kvCacheLength + inputTokenLength + step)
+      );
+      this.tvm.endScope();
+
+      const nextToken = await this.sampleTokenFromLogits(logits);
+      logits.dispose();
+
+      tokens.push(nextToken);
+      const outputTokens = tokens.slice(inputTokenLength);
+      outputPrompt = this.tokenizer.decodeIds(outputTokens);
+
+      if (nextToken == this.eosTokenId) break;
+
+      const stopPos = outputPrompt.lastIndexOf(stopStr);
+      if (stopPos != -1) {
+        outputPrompt = outputPrompt.substring(0, stopPos);
+        break;
+      }
+      let tend = performance.now();
+      if (step != 0) {
+        this.decodingTotalTokens += 1;
+        this.decodingTotalTime += (tend - tstart) / 1000;
+      } else {
+        this.encodingTotalTime += (tend - tstart) / 1000;
+        this.encodingTotalTokens += inputTokenLength;
+      }
+    }
+    this.kvCacheLength += tokens.length - 1;
+    this.conversation.messages[this.conversation.messages.length - 1][1] = outputPrompt;
+    return outputPrompt;
+  }
+
+  runtimeStatsText() {
+    return (
+      `encoding: ${(this.encodingTotalTokens / this.encodingTotalTime).toFixed(4)} tokens/sec, ` +
+      `decoding: ${(this.decodingTotalTokens / this.decodingTotalTime).toFixed(4)} tokens/sec`
+    )
+  }
+}
 
 /**
  * A instance that can be used to facilitate deployment.
@@ -448,6 +713,7 @@ class LLMChatInstance {
     this.config = undefined;
     this.tvm = undefined;
     this.pipeline = undefined;
+    this.local_llm = undefined;
     this.uiChat = undefined;
     this.uiChatInput = undefined;
     this.logger = console.log;
@@ -541,8 +807,12 @@ class LLMChatInstance {
     const LCAgents = await tvmjsGlobalEnv.LangChainAgents();
     const LCTools = await tvmjsGlobalEnv.LangChainTools();
     const LCCalculator = await tvmjsGlobalEnv.LangChainCalculator();
+    const LCOpenAI = await tvmjsGlobalEnv.LangChainOpenAI();
     this.pipeline = this.tvm.withNewScope(() => {
-      return new LLMChatPipeline(this.tvm, tokenizer, this.tvm.cacheMetadata, this.config, LCPrompts);
+      return new LLMChatPipeline(this.tvm, tokenizer, this.tvm.cacheMetadata, this.config, LCPrompts, LCAgents, LCTools, LCCalculator, LCOpenAI);
+    });
+    this.local_llm = this.tvm.withNewScope(() => {
+      new LocalLLM(this.tvm, tokenizer, this.tvm.cacheMetadata, this.config);
     });
     await this.pipeline.asyncLoadWebGPUPiplines();
     this.updateLastMessage("init", "All initialization finished.");
@@ -679,7 +949,23 @@ class LLMChatInstance {
       console.log(langchain_prompt);
       const lc_prompts = await langchain_prompt.format({ input_var: output});
       console.log(lc_prompts);
+
       // todo (yongwww): agents and tools
+      // const model = new this.pipeline.LCOpenAI.OpenAI({ temperature: 0 });
+      const local_model = this.local_llm
+      //new LocalLLM(this.tvm, tokenizer, this.tvm.cacheMetadata, this.config);
+
+      const tools = [
+        new this.pipeline.LCCalculator.Calculator(),
+      ];
+      const executor = await this.pipeline.LCAgents.initializeAgentExecutorWithOptions(tools, local_model, {
+        agentType: "zero-shot-react-description",
+        verbose: true,
+      });
+      const input = `Who is Olivia Wilde's boyfriend? What is his current age raised to the 0.23 power?`;
+      // const result = await executor.call({ input });
+      // console.log(result);
+
       // #####
       generate_image(lc_prompts);
       this.uiChatInfoLabel.innerHTML = this.pipeline.runtimeStatsText();
